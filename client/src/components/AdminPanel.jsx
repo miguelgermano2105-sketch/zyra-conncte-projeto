@@ -20,10 +20,10 @@ export default function AdminPanel() {
     setError('');
     try {
       const [s, u, sv, a] = await Promise.all([
-        api.get('/admin/stats'),
-        api.get('/admin/users'),
-        api.get('/admin/servers'),
-        api.get('/admin/audit'),
+        api('/admin/stats'),
+        api('/admin/users'),
+        api('/admin/servers'),
+        api('/admin/audit'),
       ]);
       setStats(s.stats || s);
       setUsers(u.users || []);
@@ -38,10 +38,9 @@ export default function AdminPanel() {
 
   useEffect(() => { load(); }, []);
 
-  const act = async (path, body, method = 'post') => {
+  const act = async (path, body, method = 'POST') => {
     try {
-      if (method === 'delete') await api.del(path);
-      else await api.post(path, body);
+      await api(path, { method, body });
       app.toast('Ação aplicada.', 'ok');
       await load();
     } catch (err) {
@@ -109,7 +108,7 @@ export default function AdminPanel() {
                       <button type="button" className="btn btn--sm" onClick={() => act(`/admin/users/${u.id}/admin`, { admin: !u.isAdmin })}>
                         {u.isAdmin ? 'Remover admin' : 'Tornar admin'}
                       </button>
-                      <button type="button" className="btn btn--sm btn--danger" onClick={() => act(`/admin/users/${u.id}`, null, 'delete')}>
+                      <button type="button" className="btn btn--sm btn--danger" onClick={() => act(`/admin/users/${u.id}`, null, 'DELETE')}>
                         Excluir
                       </button>
                     </div>
@@ -130,7 +129,7 @@ export default function AdminPanel() {
                       {s.ownerName ? ` · dono ${s.ownerName}` : ''}
                     </span>
                   </div>
-                  <button type="button" className="btn btn--sm btn--danger" onClick={() => act(`/admin/servers/${s.id}`, null, 'delete')}>
+                  <button type="button" className="btn btn--sm btn--danger" onClick={() => act(`/admin/servers/${s.id}`, null, 'DELETE')}>
                     Excluir servidor
                   </button>
                 </li>
