@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { api, setToken } from './lib/api.js';
-import { useApp } from './store.jsx';
+import { api, setToken } from '../lib/api.js';
+import { useApp } from '../store.jsx';
 
 const Brand = () => (
   <div className="auth__brand">
