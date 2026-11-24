@@ -1,4 +1,5 @@
-import { Database } from 'node-sqlite3-wasm';
+import sqlite from 'node-sqlite3-wasm';
+const { Database } = sqlite;
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
