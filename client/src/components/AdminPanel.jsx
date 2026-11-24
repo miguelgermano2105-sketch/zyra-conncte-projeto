@@ -103,10 +103,10 @@ export default function AdminPanel() {
                     <div className="rows__actions">
                       {u.isAdmin && <span className="badge">admin</span>}
                       {u.suspended && <span className="badge badge--danger">suspenso</span>}
-                      <button type="button" className="btn btn--sm" onClick={() => act(`/admin/users/${u.id}/suspend`, { suspended: !u.suspended })}>
+                      <button type="button" className="btn btn--sm" onClick={() => act(`/admin/users/${u.id}/suspend`, { suspend: !u.suspended })}>
                         {u.suspended ? 'Reativar' : 'Suspender'}
                       </button>
-                      <button type="button" className="btn btn--sm" onClick={() => act(`/admin/users/${u.id}/admin`, { isAdmin: !u.isAdmin })}>
+                      <button type="button" className="btn btn--sm" onClick={() => act(`/admin/users/${u.id}/admin`, { admin: !u.isAdmin })}>
                         {u.isAdmin ? 'Remover admin' : 'Tornar admin'}
                       </button>
                       <button type="button" className="btn btn--sm btn--danger" onClick={() => act(`/admin/users/${u.id}`, null, 'delete')}>
@@ -126,7 +126,7 @@ export default function AdminPanel() {
                   <div className="rows__main">
                     <strong>{s.name}</strong>
                     <span className="muted">
-                      {s.memberCount ?? s.members ?? 0} membros · {s.channelCount ?? 0} canais
+                      {s.members ?? 0} membros · {s.channels ?? 0} canais
                       {s.ownerName ? ` · dono ${s.ownerName}` : ''}
                     </span>
                   </div>
@@ -145,7 +145,7 @@ export default function AdminPanel() {
                   <div className="rows__main">
                     <strong>{entry.action}</strong>
                     <span className="muted">
-                      {entry.actorName || entry.username || 'sistema'} · {entry.target || ''} · {fullDate(entry.createdAt)}
+                      {entry.actor || 'sistema'} · {entry.target || ''} · {entry.serverName || ''} · {fullDate(entry.createdAt)}
                     </span>
                   </div>
                 </li>
