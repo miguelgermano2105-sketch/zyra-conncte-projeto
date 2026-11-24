@@ -263,6 +263,21 @@ CREATE TABLE IF NOT EXISTS stickers (
 
 db.exec(SCHEMA);
 
+/* ---------- migrações incrementais ---------- */
+function hasColumn(table, column) {
+  return db.all(`PRAGMA table_info(${table})`).some((c) => c.name === column);
+}
+const MIGRATIONS = [
+  ['users', 'token_version', 'INTEGER NOT NULL DEFAULT 0'],
+  ['users', 'is_bot', 'INTEGER NOT NULL DEFAULT 0'],
+  ['users', 'bot_owner_id', 'TEXT'],
+];
+for (const [table, column, definition] of MIGRATIONS) {
+  if (!hasColumn(table, column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
+
 /* ---------- query helpers ---------- */
 export const all = (sql, ...params) => db.all(sql, params);
 export const get = (sql, ...params) => db.get(sql, params);
