@@ -1,5 +1,6 @@
 import { all, get, jsonParse } from '../db.js';
-import { basePerms, channelView, memberList, serverChannels, serverRoles } from './guards.js';
+import { channelView, memberList, serverChannels, serverRoles } from './guards.js';
+import { basePerms } from './perms.js';
 import { userRef } from './serialize.js';
 
 export function serverView(serverId, userId) {
