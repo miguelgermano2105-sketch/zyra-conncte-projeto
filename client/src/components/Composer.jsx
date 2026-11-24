@@ -50,8 +50,16 @@ export default function Composer({
     try {
       for (const file of picked) {
         const data = await uploadFile(file);
-        const attachment = data?.attachment || data?.file;
-        if (attachment) setFiles((current) => [...current, { local: file, attachment }]);
+        const stored = data?.upload || data?.attachment;
+        if (stored) {
+          const attachment = {
+            url: stored.url,
+            name: stored.filename || stored.name || file.name,
+            size: stored.size ?? file.size,
+            mime: stored.mime || file.type,
+          };
+          setFiles((current) => [...current, { local: file, attachment }]);
+        }
       }
     } catch (error) {
       app.toast(error.message, 'error');
