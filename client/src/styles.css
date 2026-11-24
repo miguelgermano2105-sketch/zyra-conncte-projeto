@@ -678,3 +678,8 @@ h1, h2, h3, h4 { margin: 0; line-height: 1.25; }
 @media (min-width: 861px) {
   .drawer-backdrop { display: none; }
 }
+
+/* densidade e redução de movimento (preferências do usuário) */
+[data-compact="1"] .msg { padding-top: 2px; padding-bottom: 2px; }
+[data-compact="1"] .msg__text { line-height: 1.35; }
+[data-calm="1"] * { animation-duration: 0.001s !important; transition-duration: 0.001s !important; }
