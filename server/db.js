@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS users (
   last_seen INTEGER NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS sessions (
+CREATE TABLE IF NOT EXISTS user_sessions (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   user_agent TEXT NOT NULL DEFAULT '',
@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   created_at INTEGER NOT NULL,
   last_seen INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS user_sessions_user ON user_sessions(user_id);
 
 CREATE TABLE IF NOT EXISTS servers (
   id TEXT PRIMARY KEY,
@@ -260,6 +260,121 @@ CREATE TABLE IF NOT EXISTS stickers (
   creator_id TEXT,
   created_at INTEGER NOT NULL
 );
+
+/* ------------------- etapa 02: contas, perfis e identidade ------------------- */
+CREATE TABLE IF NOT EXISTS schema_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS profiles (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  banner_url TEXT,
+  banner_color TEXT NOT NULL DEFAULT '#6d5efc',
+  bio TEXT NOT NULL DEFAULT '',
+  pronouns TEXT NOT NULL DEFAULT '',
+  accent_color TEXT NOT NULL DEFAULT '#8b7cf6',
+  location TEXT NOT NULL DEFAULT '',
+  website TEXT NOT NULL DEFAULT '',
+  updated_at INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS user_settings (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  presence_visibility TEXT NOT NULL DEFAULT 'everyone',
+  allow_friend_requests TEXT NOT NULL DEFAULT 'everyone',
+  allow_dms TEXT NOT NULL DEFAULT 'everyone',
+  show_activity INTEGER NOT NULL DEFAULT 1,
+  show_mutual_friends INTEGER NOT NULL DEFAULT 1,
+  show_email INTEGER NOT NULL DEFAULT 0,
+  notifications TEXT NOT NULL DEFAULT '{}',
+  updated_at INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS user_presence (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'offline',
+  custom_status TEXT NOT NULL DEFAULT '',
+  activity TEXT NOT NULL DEFAULT '',
+  updated_at INTEGER NOT NULL DEFAULT 0,
+  last_active INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS badges (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  icon TEXT NOT NULL DEFAULT '✦',
+  color TEXT NOT NULL DEFAULT '#8b7cf6',
+  rarity TEXT NOT NULL DEFAULT 'common',
+  criteria TEXT NOT NULL DEFAULT '',
+  grantable INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS user_badges (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  badge_id TEXT NOT NULL REFERENCES badges(id) ON DELETE CASCADE,
+  granted_by TEXT,
+  granted_at INTEGER NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (user_id, badge_id)
+);
+
+CREATE TABLE IF NOT EXISTS friend_requests (
+  id TEXT PRIMARY KEY,
+  from_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  to_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  message TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at INTEGER NOT NULL,
+  responded_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS friend_requests_to ON friend_requests(to_id, status);
+CREATE INDEX IF NOT EXISTS friend_requests_from ON friend_requests(from_id, status);
+CREATE UNIQUE INDEX IF NOT EXISTS friend_requests_pending ON friend_requests(from_id, to_id) WHERE status = 'pending';
+
+CREATE TABLE IF NOT EXISTS blocked_users (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  blocked_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  reason TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, blocked_id)
+);
+
+CREATE TABLE IF NOT EXISTS email_tokens (
+  token_hash TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  email TEXT NOT NULL DEFAULT '',
+  expires_at INTEGER NOT NULL,
+  used_at INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS email_tokens_user ON email_tokens(user_id, kind);
+
+CREATE TABLE IF NOT EXISTS email_outbox (
+  id TEXT PRIMARY KEY,
+  user_id TEXT,
+  to_email TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  body TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL,
+  link TEXT,
+  delivered INTEGER NOT NULL DEFAULT 0,
+  provider TEXT NOT NULL DEFAULT 'outbox',
+  error TEXT,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS login_attempts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  identifier TEXT NOT NULL,
+  ip TEXT NOT NULL DEFAULT '',
+  success INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS login_attempts_lookup ON login_attempts(identifier, created_at);
 `;
 
 db.exec(SCHEMA);
@@ -272,11 +387,91 @@ const MIGRATIONS = [
   ['users', 'token_version', 'INTEGER NOT NULL DEFAULT 0'],
   ['users', 'is_bot', 'INTEGER NOT NULL DEFAULT 0'],
   ['users', 'bot_owner_id', 'TEXT'],
+  ['users', 'discriminator', 'INTEGER NOT NULL DEFAULT 0'],
+  ['users', 'email_verified', 'INTEGER NOT NULL DEFAULT 0'],
+  ['users', 'email_verified_at', 'INTEGER'],
 ];
 for (const [table, column, definition] of MIGRATIONS) {
   if (!hasColumn(table, column)) {
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
+}
+
+function hasTable(name) {
+  return Boolean(db.get("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", [name]));
+}
+
+/* ---------- etapa 02: renomeia sessions -> user_sessions preservando dados ---------- */
+if (hasTable('sessions')) {
+  if (!hasTable('user_sessions')) {
+    db.exec('ALTER TABLE sessions RENAME TO user_sessions');
+  } else {
+    db.exec(
+      `INSERT OR IGNORE INTO user_sessions (id, user_id, user_agent, ip, created_at, last_seen)
+       SELECT id, user_id, user_agent, ip, created_at, last_seen FROM sessions`,
+    );
+    db.exec('DROP TABLE sessions');
+  }
+}
+db.exec('CREATE INDEX IF NOT EXISTS user_sessions_user ON user_sessions(user_id)');
+
+/* ---------- etapa 02: backfill de identidade, perfil, privacidade e presença ---------- */
+const metaValue = (key) => db.get('SELECT value FROM schema_meta WHERE key = ?', [key])?.value;
+
+if (!metaValue('stage2_identity')) {
+  const ts = Date.now();
+  for (const row of db.all('SELECT * FROM users')) {
+    if (!row.discriminator) {
+      const taken = new Set(
+        db.all('SELECT discriminator FROM users WHERE username_lower = ?', [row.username_lower])
+          .map((r) => r.discriminator),
+      );
+      let candidate = 0;
+      for (let i = 0; i < 60 && !candidate; i += 1) {
+        const pick = 1 + Math.floor(Math.random() * 9999);
+        if (!taken.has(pick)) candidate = pick;
+      }
+      for (let pick = 1; pick <= 9999 && !candidate; pick += 1) {
+        if (!taken.has(pick)) candidate = pick;
+      }
+      db.run('UPDATE users SET discriminator = ? WHERE id = ?', [candidate, row.id]);
+    }
+    db.run(
+      `INSERT OR IGNORE INTO profiles (user_id, banner_url, banner_color, bio, updated_at)
+       VALUES (?, NULL, ?, ?, ?)`,
+      [row.id, row.banner_color || '#6d5efc', row.bio || '', ts],
+    );
+    db.run('INSERT OR IGNORE INTO user_settings (user_id, updated_at) VALUES (?, ?)', [row.id, ts]);
+    db.run(
+      `INSERT OR IGNORE INTO user_presence (user_id, status, custom_status, activity, updated_at, last_active)
+       VALUES (?, ?, ?, '', ?, ?)`,
+      [row.id, row.status || 'offline', row.custom_status || '', ts, row.last_seen || ts],
+    );
+    /* contas anteriores à verificação de e-mail não ficam bloqueadas */
+    db.run('UPDATE users SET email_verified = 1, email_verified_at = ? WHERE id = ? AND email_verified = 0', [ts, row.id]);
+  }
+  db.run('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)', ['stage2_identity', String(ts)]);
+}
+
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_tag ON users(username_lower, discriminator)');
+
+/* ---------- etapa 02: catálogo oficial de insígnias ZYRA ---------- */
+const BADGE_SEED = [
+  ['founder', 'Fundador', 'Criou a ZYRA CONNECT e ajudou a definir a plataforma.', '👑', '#a855f7', 'legendary', 'Concedida à primeira conta da plataforma e a fundadores autorizados.', 0],
+  ['developer', 'Desenvolvedor', 'Contribui com código, infraestrutura ou integrações da ZYRA.', '🛠️', '#38bdf8', 'epic', 'Concedida pela administração a quem contribui tecnicamente.', 1],
+  ['verified', 'Verificado', 'Identidade confirmada pela equipe ZYRA.', '✅', '#22c55e', 'rare', 'Concedida após análise da equipe de moderação.', 1],
+  ['moderator', 'Moderador', 'Cuida da segurança e da boa convivência nas comunidades.', '🛡️', '#f59e0b', 'epic', 'Concedida a moderadores ativos da plataforma.', 1],
+  ['supporter', 'Apoiador', 'Ajuda a comunidade com suporte, guias e acolhimento.', '💜', '#ec4899', 'rare', 'Concedida a quem apoia a comunidade de forma consistente.', 1],
+  ['event_aurora', 'Evento Aurora', 'Participou do evento de lançamento Aurora.', '🌌', '#8b5cf6', 'rare', 'Concedida durante eventos oficiais da ZYRA.', 1],
+  ['achievement_pioneer', 'Pioneiro', 'Uma das primeiras contas da ZYRA CONNECT.', '🚀', '#06b6d4', 'epic', 'Automática para as primeiras contas criadas na plataforma.', 0],
+  ['achievement_community', 'Coração da Comunidade', 'Criou servidores ativos e reuniu pessoas.', '💠', '#f472b6', 'rare', 'Concedida a quem constrói comunidades ativas.', 1],
+];
+for (const [id, name, description, icon, color, rarity, criteria, grantable] of BADGE_SEED) {
+  db.run(
+    `INSERT OR IGNORE INTO badges (id, name, description, icon, color, rarity, criteria, grantable, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, name, description, icon, color, rarity, criteria, grantable, Date.now()],
+  );
 }
 
 /* ---------- query helpers ---------- */
