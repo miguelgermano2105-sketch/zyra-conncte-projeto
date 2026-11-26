@@ -1,10 +1,14 @@
 import { all, get, jsonParse } from '../db.js';
+import { identityOf, padDiscriminator } from './identity.js';
 
 export function publicUser(row) {
   if (!row) return null;
+  const identity = identityOf(row);
   return {
     id: row.id,
     username: row.username,
+    discriminator: padDiscriminator(identity.discriminator),
+    tag: identity.tag,
     displayName: row.display_name,
     avatarUrl: row.avatar_url || null,
     bannerColor: row.banner_color,
@@ -12,14 +16,20 @@ export function publicUser(row) {
     status: row.status,
     customStatus: row.custom_status,
     isAdmin: !!row.is_admin,
+    isBot: !!row.is_bot,
     createdAt: row.created_at,
   };
 }
 
 export function selfUser(row) {
+  const identity = identityOf(row);
   return {
     ...publicUser(row),
     email: row.email,
+    emailVerified: !!row.email_verified,
+    emailVerifiedAt: row.email_verified_at || null,
+    discriminator: padDiscriminator(identity.discriminator),
+    tag: identity.tag,
     preferences: jsonParse(row.preferences, {}),
     suspended: !!row.suspended,
   };
@@ -30,6 +40,8 @@ export function userRef(row) {
   return {
     id: row.id,
     username: row.username,
+    discriminator: padDiscriminator(row.discriminator),
+    tag: identityOf(row).tag,
     displayName: row.display_name,
     avatarUrl: row.avatar_url || null,
   };

@@ -25,7 +25,7 @@ export function createSession(user, req) {
   const sid = uid();
   const ts = now();
   run(
-    'INSERT INTO sessions (id, user_id, user_agent, ip, created_at, last_seen) VALUES (?, ?, ?, ?, ?, ?)',
+    'INSERT INTO user_sessions (id, user_id, user_agent, ip, created_at, last_seen) VALUES (?, ?, ?, ?, ?, ?)',
     sid, user.id, String(req.headers['user-agent'] || '').slice(0, 200),
     String(req.ip || '').slice(0, 60), ts, ts,
   );
@@ -36,7 +36,13 @@ export function createSession(user, req) {
 }
 
 export function destroySession(sid) {
-  if (sid) run('DELETE FROM sessions WHERE id = ?', sid);
+  if (sid) run('DELETE FROM user_sessions WHERE id = ?', sid);
+}
+
+/** Encerra todas as sessões do usuário, opcionalmente preservando a atual. */
+export function revokeSessions(userId, exceptSid = null) {
+  if (exceptSid) run('DELETE FROM user_sessions WHERE user_id = ? AND id != ?', userId, exceptSid);
+  else run('DELETE FROM user_sessions WHERE user_id = ?', userId);
 }
 
 export function userFromToken(token) {
@@ -46,7 +52,7 @@ export function userFromToken(token) {
   } catch {
     throw unauthorized('Sessão inválida ou expirada.');
   }
-  const session = get('SELECT * FROM sessions WHERE id = ?', payload.sid);
+  const session = get('SELECT * FROM user_sessions WHERE id = ?', payload.sid);
   if (!session || session.user_id !== payload.sub) throw unauthorized('Sessão encerrada.');
   const user = get('SELECT * FROM users WHERE id = ?', payload.sub);
   if (!user) throw unauthorized('Conta não encontrada.');
@@ -72,7 +78,7 @@ export function authRequired(req, _res, next) {
     req.session = session;
     const ts = now();
     if (ts - session.last_seen > 60_000) {
-      run('UPDATE sessions SET last_seen = ? WHERE id = ?', ts, session.id);
+      run('UPDATE user_sessions SET last_seen = ? WHERE id = ?', ts, session.id);
       run('UPDATE users SET last_seen = ? WHERE id = ?', ts, user.id);
     }
     next();
